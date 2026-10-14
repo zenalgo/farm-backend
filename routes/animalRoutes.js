@@ -10,6 +10,7 @@ const {
   logPregnancy,
   addMedicalLog,
   getAnimalAlerts,
+  logAnimalFeeding,
 } = require("../controllers/animalController");
 const { protect, authorize } = require("../middleware/auth");
 
@@ -33,5 +34,6 @@ router.put("/:id", authorize("admin", "manager_operations", "field_manager"), up
 router.post("/:id/heat", logHeatCycle);
 router.post("/:id/pregnancy", logPregnancy);
 router.post("/:id/medical", uploadFields, addMedicalLog);
+router.post("/:id/feed", logAnimalFeeding);
 
 module.exports = router;

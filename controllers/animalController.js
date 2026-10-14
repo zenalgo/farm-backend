@@ -278,6 +278,51 @@ const getAnimalAlerts = async (req, res) => {
   }
 };
 
+// 🌾 Daily Animal Feed Consumption Logging
+const logAnimalFeeding = async (req, res) => {
+  try {
+    const animal = await Animal.findById(req.params.id);
+    if (!animal) return res.status(404).json({ message: "Animal not found" });
+
+    const { feedType, quantityKg, siloId, notes, date } = req.body;
+    const qty = Number(quantityKg);
+    if (!qty || qty <= 0) {
+      return res.status(400).json({ message: "quantityKg must be greater than 0" });
+    }
+
+    const { deductFeedStock } = require("./feedController");
+    const feedResult = await deductFeedStock({
+      siloId,
+      feedType: feedType || (animal.species === "goat" ? "Goat Feed" : "Cattle Feed"),
+      quantityKg: qty,
+      source: "animal",
+      relatedAnimal: animal._id,
+      description: `Feeding ${animal.species.toUpperCase()} (${animal.tagId}) - ${qty} kg ${feedType || "Feed"}`,
+      userId: req.user?._id,
+    });
+
+    animal.feedingLogs.push({
+      date: date ? new Date(date) : new Date(),
+      feedType: feedType || (feedResult?.silo?.name || "Feed"),
+      quantityKg: qty,
+      notes: notes || "",
+      feedTransaction: feedResult?.transaction?._id || null,
+      recordedBy: req.user?._id,
+    });
+
+    await animal.save();
+
+    res.status(200).json({
+      success: true,
+      message: `Logged feeding of ${qty} kg for ${animal.tagId}`,
+      animal,
+      feedTransaction: feedResult?.transaction,
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to log animal feeding", error: error.message });
+  }
+};
+
 module.exports = {
   getAnimals,
   getAnimalById,
@@ -287,4 +332,5 @@ module.exports = {
   logPregnancy,
   addMedicalLog,
   getAnimalAlerts,
+  logAnimalFeeding,
 };

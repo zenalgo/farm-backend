@@ -6,6 +6,7 @@ const locationSchema = new mongoose.Schema(
     latitude: { type: Number },
     longitude: { type: Number },
     address: { type: String, default: "" },
+    selfieUrl: { type: String, default: "" },
   },
   { _id: false }
 );

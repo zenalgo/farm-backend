@@ -1,6 +1,7 @@
 const Attendance = require("../models/Attendance");
 const User = require("../models/User");
 const reverseGeocode = require("../utils/geocode");
+const uploadBufferToCloudinary = require("../utils/uploadToCloudinary");
 
 const startOfDay = (d = new Date()) => {
   const date = new Date(d);
@@ -13,6 +14,13 @@ const FREE_LEAVES_PER_MONTH = 2;
 const checkIn = async (req, res) => {
   try {
     const { latitude, longitude } = req.body;
+    let selfieUrl = req.body.selfieUrl || "";
+
+    const selfieFile = req.file || req.files?.selfie?.[0] || req.files?.photo?.[0];
+    if (selfieFile) {
+      selfieUrl = await uploadBufferToCloudinary(selfieFile.buffer, "farmhouse/attendance/selfies", "image");
+    }
+
     if (latitude === undefined || longitude === undefined) {
       return res.status(400).json({ message: "Latitude and longitude are required" });
     }
@@ -25,7 +33,7 @@ const checkIn = async (req, res) => {
     }
 
     const address = await reverseGeocode(latitude, longitude);
-    const timeIn = { time: new Date(), latitude, longitude, address };
+    const timeIn = { time: new Date(), latitude, longitude, address, selfieUrl };
 
     if (record) {
       record.timeIn = timeIn;
@@ -43,6 +51,13 @@ const checkIn = async (req, res) => {
 const checkOut = async (req, res) => {
   try {
     const { latitude, longitude } = req.body;
+    let selfieUrl = req.body.selfieUrl || "";
+
+    const selfieFile = req.file || req.files?.selfie?.[0] || req.files?.photo?.[0];
+    if (selfieFile) {
+      selfieUrl = await uploadBufferToCloudinary(selfieFile.buffer, "farmhouse/attendance/selfies", "image");
+    }
+
     if (latitude === undefined || longitude === undefined) {
       return res.status(400).json({ message: "Latitude and longitude are required" });
     }
@@ -58,7 +73,7 @@ const checkOut = async (req, res) => {
     }
 
     const address = await reverseGeocode(latitude, longitude);
-    record.timeOut = { time: new Date(), latitude, longitude, address };
+    record.timeOut = { time: new Date(), latitude, longitude, address, selfieUrl };
     await record.save();
 
     res.status(200).json({ message: "Checked out", attendance: record });

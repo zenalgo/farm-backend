@@ -293,6 +293,22 @@ const addRecord = async (req, res) => {
       recordedBy: req.user._id,
     });
 
+    if (feed > 0) {
+      try {
+        const { deductFeedStock } = require("./feedController");
+        await deductFeedStock({
+          feedType: req.body.feedType || "Grower",
+          quantityKg: feed,
+          source: "poultry",
+          relatedPoultryBatch: batch._id,
+          description: `Poultry feeding: ${batch.name} (${feed} kg)`,
+          userId: req.user?._id,
+        });
+      } catch (fe) {
+        console.error("Feed deduction error on poultry record:", fe.message);
+      }
+    }
+
     res.status(201).json({ message: "Record added", record });
   } catch (error) {
     res.status(500).json({ message: "Failed to add record", error: error.message });
@@ -935,6 +951,22 @@ const addBrooderRecord = async (req, res) => {
       remarks: remarks || "",
       recordedBy: req.user?._id,
     });
+
+    if (Number(feedKg) > 0) {
+      try {
+        const { deductFeedStock } = require("./feedController");
+        await deductFeedStock({
+          feedType: req.body.feedType || "Pre-Starter",
+          quantityKg: Number(feedKg),
+          source: "brooder",
+          relatedPoultryBrooder: brooder._id,
+          description: `Brooder feeding: ${brooder.batchName} (${feedKg} kg)`,
+          userId: req.user?._id,
+        });
+      } catch (fe) {
+        console.error("Feed deduction error on brooder record:", fe.message);
+      }
+    }
 
     res.status(201).json({ message: "Brooder daily record added", record });
   } catch (error) {

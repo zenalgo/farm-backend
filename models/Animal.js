@@ -71,6 +71,18 @@ const animalSchema = new mongoose.Schema(
       },
     ],
 
+    // 🌾 Daily Feed History Logs
+    feedingLogs: [
+      {
+        date: { type: Date, default: Date.now },
+        feedType: { type: String, required: true }, // e.g. "Cattle Feed", "Green Fodder", "Dry Fodder", "Concentrate"
+        quantityKg: { type: Number, required: true },
+        notes: { type: String, default: "" },
+        feedTransaction: { type: mongoose.Schema.Types.ObjectId, ref: "FeedTransaction", default: null },
+        recordedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+      },
+    ],
+
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
   },
   { timestamps: true }

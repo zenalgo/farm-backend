@@ -1,6 +1,7 @@
 const FieldPatch = require("../models/FieldPatch");
 const User = require("../models/User");
 const WorkTask = require("../models/WorkTask");
+const uploadBufferToCloudinary = require("../utils/uploadToCloudinary");
 
 const startOfDay = (d = new Date()) => {
   const date = new Date(d);
@@ -52,7 +53,12 @@ const generateFieldPatchTasksForUserToday = async (userId, day = startOfDay(new 
 // @access  Private (Admin / Manager)
 exports.createPatch = async (req, res) => {
   try {
-    const { name, image, work, workType, landmark, assignedTo, crop, size, status } = req.body;
+    let { name, image, work, workType, landmark, assignedTo, crop, size, status } = req.body;
+
+    const photoFile = req.file || req.files?.photo?.[0];
+    if (photoFile) {
+      image = await uploadBufferToCloudinary(photoFile.buffer, "farmhouse/patches", "image");
+    }
 
     let assignedToName = "Unassigned Worker";
     if (assignedTo) {
@@ -144,7 +150,12 @@ exports.updatePatch = async (req, res) => {
       return res.status(404).json({ message: "Field patch not found" });
     }
 
-    const { name, image, work, workType, landmark, assignedTo, crop, size, status } = req.body;
+    let { name, image, work, workType, landmark, assignedTo, crop, size, status } = req.body;
+
+    const photoFile = req.file || req.files?.photo?.[0];
+    if (photoFile) {
+      image = await uploadBufferToCloudinary(photoFile.buffer, "farmhouse/patches", "image");
+    }
 
     if (name) patch.name = name;
     if (image) patch.image = image;
@@ -186,11 +197,16 @@ exports.updatePatch = async (req, res) => {
 // @access  Private (Worker)
 exports.submitPatchWork = async (req, res) => {
   try {
-    const { submissionProof, submissionNotes } = req.body;
+    let { submissionProof, submissionNotes } = req.body;
     const patch = await FieldPatch.findById(req.params.id);
 
     if (!patch) {
       return res.status(404).json({ message: "Field patch not found" });
+    }
+
+    const photoFile = req.file || req.files?.photo?.[0];
+    if (photoFile) {
+      submissionProof = await uploadBufferToCloudinary(photoFile.buffer, "farmhouse/patches/proofs", "image");
     }
 
     patch.submissionProof = submissionProof || patch.image;

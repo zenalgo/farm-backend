@@ -16,12 +16,13 @@ const {
   getSalarySummary,
 } = require("../controllers/attendanceController");
 const { protect, authorize } = require("../middleware/auth");
+const { uploadSinglePhoto } = require("../middleware/upload");
 
 router.use(protect); // every attendance route requires login
 
 // Self — any logged-in staff
-router.post("/checkin", checkIn);
-router.post("/checkout", checkOut);
+router.post("/checkin", uploadSinglePhoto, checkIn);
+router.post("/checkout", uploadSinglePhoto, checkOut);
 router.get("/me", getMyAttendance);
 router.post("/:id/edit-request", requestEdit);
 router.post("/leave-request", applyLeave);
