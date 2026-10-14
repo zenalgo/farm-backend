@@ -37,6 +37,34 @@ const ensureDefaultSilos = async (userId) => {
   }
 };
 
+// Helper: check low stock and notify Admin & Managers
+const checkAndNotifyLowStock = async (silo) => {
+  if (!silo || (silo.currentStockKg || 0) > (silo.reorderLevelKg || 2000)) return;
+  try {
+    const Notification = require("../models/Notification");
+    const { createNotificationForRoles } = require("./notificationController");
+
+    const recent = await Notification.findOne({
+      type: "inventory",
+      "metadata.siloId": silo._id,
+      createdAt: { $gte: new Date(Date.now() - 6 * 60 * 60 * 1000) },
+    });
+
+    if (!recent) {
+      await createNotificationForRoles({
+        roles: ["admin", "manager_operations", "field_manager"],
+        title: `⚠️ Low Feed Stock Alert: ${silo.name}`,
+        message: `Silo "${silo.name}" has only ${silo.currentStockKg} kg stock left (below reorder threshold of ${silo.reorderLevelKg} kg). Please refill or mix feed.`,
+        type: "inventory",
+        link: "/feed-management",
+        metadata: { siloId: silo._id, siloName: silo.name, currentStockKg: silo.currentStockKg },
+      });
+    }
+  } catch (err) {
+    console.error("checkAndNotifyLowStock error:", err.message);
+  }
+};
+
 // @desc    Get all feed silos with capacity and fill %
 // @route   GET /api/feed/silos
 // @access  Private
@@ -50,12 +78,58 @@ exports.getFeedSilos = async (req, res) => {
     const totalCapacityKg = silos.reduce((sum, s) => sum + (s.capacityKg || 0), 0);
     const lowStockCount = silos.filter((s) => s.currentStockKg <= s.reorderLevelKg).length;
 
+    // Calculate Category Breakdown (Poultry, Cattle, Goat, General)
+    const categorySummary = {
+      poultry: {
+        label: "Poultry Feed",
+        sublabel: "Pre-Starter, Starter, Grower, Finisher",
+        icon: "🐔",
+        stockKg: 0,
+        capacityKg: 0,
+        silosCount: 0,
+      },
+      cattle: {
+        label: "Cattle Feed",
+        sublabel: "Cow & Buffalo Rations",
+        icon: "🐄",
+        stockKg: 0,
+        capacityKg: 0,
+        silosCount: 0,
+      },
+      goat: {
+        label: "Goat Feed",
+        sublabel: "Caprine Feed & Pellets",
+        icon: "🐐",
+        stockKg: 0,
+        capacityKg: 0,
+        silosCount: 0,
+      },
+      general: {
+        label: "General / Own Mix",
+        sublabel: "Farm Mixed Rations",
+        icon: "🌾",
+        stockKg: 0,
+        capacityKg: 0,
+        silosCount: 0,
+      },
+    };
+
+    silos.forEach((s) => {
+      const cat = s.category || "general";
+      if (categorySummary[cat]) {
+        categorySummary[cat].stockKg += (s.currentStockKg || 0);
+        categorySummary[cat].capacityKg += (s.capacityKg || 0);
+        categorySummary[cat].silosCount += 1;
+      }
+    });
+
     res.status(200).json({
       success: true,
       count: silos.length,
       totalStockKg,
       totalCapacityKg,
       lowStockCount,
+      categorySummary,
       silos,
     });
   } catch (error) {
@@ -253,6 +327,9 @@ exports.createFeedTransaction = async (req, res) => {
       silo.currentStockKg = Math.max(0, (silo.currentStockKg || 0) - qty);
     }
     await silo.save();
+    if (type.toUpperCase() === "DEBIT") {
+      checkAndNotifyLowStock(silo);
+    }
 
     const price = Number(unitPrice) || silo.costPerKg || 0;
     const totalAmount = price * qty;
@@ -510,6 +587,7 @@ exports.deductFeedStock = async ({
 
     silo.currentStockKg = Math.max(0, silo.currentStockKg - qty);
     await silo.save();
+    checkAndNotifyLowStock(silo);
 
     const tx = await FeedTransaction.create({
       date: new Date(),
@@ -530,5 +608,199 @@ exports.deductFeedStock = async ({
   } catch (err) {
     console.error("deductFeedStock error:", err.message);
     return null;
+  }
+};
+
+// @desc    Get preview of active animals and daily calculated rations
+// @route   GET /api/feed/auto-preview
+// @access  Private
+exports.getDailyAutoFeedingPreview = async (req, res) => {
+  try {
+    const todayStart = startOfDay(new Date());
+
+    const animals = await Animal.find({ status: "active" });
+    const cowsCount = animals.filter((a) => a.species === "cow").length;
+    const buffaloesCount = animals.filter((a) => a.species === "buffalo").length;
+    const goatsCount = animals.filter((a) => a.species === "goat").length;
+    const dogsCount = animals.filter((a) => a.species === "dog").length;
+
+    const batches = await PoultryBatch.find({ status: { $ne: "culled" } });
+    const poultryBirdsCount = batches.reduce((sum, b) => sum + (b.totalChicksReceived || b.birdsCount || b.chicksReceived || 0), 0);
+
+    // Standard daily rations per animal (kg/day)
+    const cowRationKg = 8;
+    const buffaloRationKg = 10;
+    const goatRationKg = 1.5;
+    const poultryBirdRationKg = 0.12;
+
+    const includePoultry = req.query.includePoultry === "true";
+
+    const calculatedCattleFeedKg = (cowsCount * cowRationKg) + (buffaloesCount * buffaloRationKg);
+    const calculatedGoatFeedKg = Number((goatsCount * goatRationKg).toFixed(1));
+    const calculatedPoultryFeedKg = includePoultry ? Math.round(poultryBirdsCount * poultryBirdRationKg) : 0;
+
+    const cattleSilo = await FeedSilo.findOne({ code: "cattle_feed" }) || await FeedSilo.findOne({ category: "cattle" });
+    const goatSilo = await FeedSilo.findOne({ code: "goat_feed" }) || await FeedSilo.findOne({ category: "goat" });
+    const poultrySilo = await FeedSilo.findOne({ code: "grower" }) || await FeedSilo.findOne({ category: "poultry" });
+
+    // Check if auto-feeding already ran today
+    const existingAutoToday = await FeedTransaction.find({
+      source: "auto_schedule",
+      date: { $gte: todayStart },
+    }).populate("silo", "name");
+
+    res.status(200).json({
+      success: true,
+      alreadyRunToday: existingAutoToday.length > 0,
+      todayDeductions: existingAutoToday,
+      counts: {
+        cows: cowsCount,
+        buffaloes: buffaloesCount,
+        goats: goatsCount,
+        dogs: dogsCount,
+        poultryBirds: poultryBirdsCount,
+      },
+      rates: {
+        cowRationKg,
+        buffaloRationKg,
+        goatRationKg,
+        poultryBirdRationKg,
+      },
+      calculated: {
+        cattleFeedKg: calculatedCattleFeedKg,
+        goatFeedKg: calculatedGoatFeedKg,
+        poultryFeedKg: calculatedPoultryFeedKg,
+        totalKg: calculatedCattleFeedKg + calculatedGoatFeedKg + calculatedPoultryFeedKg,
+      },
+      silos: {
+        cattle: { id: cattleSilo?._id, name: cattleSilo?.name || "Cattle Feed", availableKg: cattleSilo?.currentStockKg || 0 },
+        goat: { id: goatSilo?._id, name: goatSilo?.name || "Goat Feed", availableKg: goatSilo?.currentStockKg || 0 },
+        poultry: { id: poultrySilo?._id, name: poultrySilo?.name || "Grower / Poultry", availableKg: poultrySilo?.currentStockKg || 0 },
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to generate auto-feeding preview", error: error.message });
+  }
+};
+
+// @desc    Execute automated daily feeding deduction across active livestock
+// @route   POST /api/feed/auto-deduct
+// @access  Private (Admin / Manager)
+exports.executeDailyAutoFeeding = async (req, res) => {
+  try {
+    const { force, customRations } = req.body;
+    const todayStart = startOfDay(new Date());
+
+    if (!force) {
+      const alreadyRun = await FeedTransaction.findOne({
+        source: "auto_schedule",
+        date: { $gte: todayStart },
+      });
+      if (alreadyRun) {
+        return res.status(400).json({
+          message: "Daily auto-feeding has already been executed for today. Use 'force: true' if you want to rerun.",
+        });
+      }
+    }
+
+    const animals = await Animal.find({ status: "active" });
+    const cowsCount = animals.filter((a) => a.species === "cow").length;
+    const buffaloesCount = animals.filter((a) => a.species === "buffalo").length;
+    const goatsCount = animals.filter((a) => a.species === "goat").length;
+
+    const batches = await PoultryBatch.find({ status: { $ne: "culled" } });
+    const poultryBirdsCount = batches.reduce((sum, b) => sum + (b.totalChicksReceived || b.birdsCount || b.chicksReceived || 0), 0);
+
+    const cowRate = customRations?.cowRationKg !== undefined ? Number(customRations.cowRationKg) : 8;
+    const bufRate = customRations?.buffaloRationKg !== undefined ? Number(customRations.buffaloRationKg) : 10;
+    const goatRate = customRations?.goatRationKg !== undefined ? Number(customRations.goatRationKg) : 1.5;
+    const poultryRate = customRations?.poultryBirdRationKg !== undefined ? Number(customRations.poultryBirdRationKg) : (poultryBirdsCount > 0 ? 0.12 : 0);
+
+    const includePoultry = req.body.includePoultry === true;
+    const cattleFeedNeeded = (cowsCount * cowRate) + (buffaloesCount * bufRate);
+    const goatFeedNeeded = Number((goatsCount * goatRate).toFixed(1));
+    const poultryFeedNeeded = includePoultry ? Math.round(poultryBirdsCount * poultryRate) : 0;
+
+    const createdTransactions = [];
+
+    // 1. Deduct Cattle Feed
+    if (cattleFeedNeeded > 0) {
+      const cattleSilo = await FeedSilo.findOne({ code: "cattle_feed" }) || await FeedSilo.findOne({ category: "cattle" });
+      if (cattleSilo) {
+        cattleSilo.currentStockKg = Math.max(0, (cattleSilo.currentStockKg || 0) - cattleFeedNeeded);
+        await cattleSilo.save();
+        checkAndNotifyLowStock(cattleSilo);
+
+        const tx = await FeedTransaction.create({
+          date: new Date(),
+          type: "DEBIT",
+          silo: cattleSilo._id,
+          feedType: cattleSilo.name,
+          quantity: cattleFeedNeeded,
+          source: "auto_schedule",
+          description: `Auto Daily Feeding: ${cowsCount} Cow(s) (${cowsCount * cowRate}kg) & ${buffaloesCount} Buffalo(es) (${buffaloesCount * bufRate}kg)`,
+          recordedBy: req.user?._id,
+        });
+        createdTransactions.push(tx);
+      }
+    }
+
+    // 2. Deduct Goat Feed
+    if (goatFeedNeeded > 0) {
+      const goatSilo = await FeedSilo.findOne({ code: "goat_feed" }) || await FeedSilo.findOne({ category: "goat" });
+      if (goatSilo) {
+        goatSilo.currentStockKg = Math.max(0, (goatSilo.currentStockKg || 0) - goatFeedNeeded);
+        await goatSilo.save();
+        checkAndNotifyLowStock(goatSilo);
+
+        const tx = await FeedTransaction.create({
+          date: new Date(),
+          type: "DEBIT",
+          silo: goatSilo._id,
+          feedType: goatSilo.name,
+          quantity: goatFeedNeeded,
+          source: "auto_schedule",
+          description: `Auto Daily Feeding: ${goatsCount} Goat(s) @ ${goatRate}kg/day (${goatFeedNeeded}kg)`,
+          recordedBy: req.user?._id,
+        });
+        createdTransactions.push(tx);
+      }
+    }
+
+    // 3. Deduct Poultry Feed (if active birds)
+    if (poultryFeedNeeded > 0) {
+      const poultrySilo = await FeedSilo.findOne({ code: "grower" }) || await FeedSilo.findOne({ category: "poultry" });
+      if (poultrySilo) {
+        poultrySilo.currentStockKg = Math.max(0, (poultrySilo.currentStockKg || 0) - poultryFeedNeeded);
+        await poultrySilo.save();
+        checkAndNotifyLowStock(poultrySilo);
+
+        const tx = await FeedTransaction.create({
+          date: new Date(),
+          type: "DEBIT",
+          silo: poultrySilo._id,
+          feedType: poultrySilo.name,
+          quantity: poultryFeedNeeded,
+          source: "auto_schedule",
+          description: `Auto Daily Feeding: ${poultryBirdsCount} Poultry Birds (${poultryFeedNeeded}kg)`,
+          recordedBy: req.user?._id,
+        });
+        createdTransactions.push(tx);
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Daily auto-feeding executed! Deducted: ${cattleFeedNeeded}kg Cattle Feed, ${goatFeedNeeded}kg Goat Feed, ${poultryFeedNeeded}kg Poultry Feed`,
+      transactions: createdTransactions,
+      deductions: {
+        cattleKg: cattleFeedNeeded,
+        goatKg: goatFeedNeeded,
+        poultryKg: poultryFeedNeeded,
+        totalKg: cattleFeedNeeded + goatFeedNeeded + poultryFeedNeeded,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Failed to execute daily auto-feeding", error: error.message });
   }
 };

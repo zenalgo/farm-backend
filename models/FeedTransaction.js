@@ -12,7 +12,7 @@ const feedTransactionSchema = new mongoose.Schema(
     totalAmount: { type: Number, default: 0 },
     source: {
       type: String,
-      enum: ["manual", "poultry", "brooder", "animal", "mixing", "purchase", "task", "spoilage"],
+      enum: ["manual", "poultry", "brooder", "animal", "mixing", "purchase", "task", "spoilage", "auto_schedule"],
       default: "manual",
     },
     // Integration references

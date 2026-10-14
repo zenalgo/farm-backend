@@ -17,6 +17,7 @@ const expenseRoutes = require("./routes/expenseRoutes");
 const fieldPatchRoutes = require("./routes/fieldPatchRoutes");
 const saleRoutes = require("./routes/saleRoutes");
 const feedRoutes = require("./routes/feedRoutes");
+const notificationRoutes = require("./routes/notificationRoutes");
 const startScheduledJobs = require("./utils/scheduledJobs");
 
 connectDB();
@@ -45,6 +46,7 @@ app.use("/api/expenses", expenseRoutes);
 app.use("/api/field-patches", fieldPatchRoutes);
 app.use("/api/financials", saleRoutes);
 app.use("/api/feed", feedRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ message: "Route not found" });

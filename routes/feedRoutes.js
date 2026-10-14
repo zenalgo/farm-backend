@@ -10,6 +10,8 @@ const {
   updateFeedTransaction,
   deleteFeedTransaction,
   executeMixingStation,
+  getDailyAutoFeedingPreview,
+  executeDailyAutoFeeding,
 } = require("../controllers/feedController");
 const { protect, authorize } = require("../middleware/auth");
 
@@ -29,5 +31,9 @@ router.delete("/transactions/:id", authorize("admin", "manager_operations"), del
 
 // Mixing Station
 router.post("/mix", authorize("admin", "manager_operations"), executeMixingStation);
+
+// Auto Daily Feeding Engine
+router.get("/auto-preview", getDailyAutoFeedingPreview);
+router.post("/auto-deduct", authorize("admin", "manager_operations", "field_manager"), executeDailyAutoFeeding);
 
 module.exports = router;
