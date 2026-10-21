@@ -18,20 +18,35 @@ const endOfDay = (d = new Date()) => {
 
 // Default seed silos to mirror screenshot and farm standards
 const DEFAULT_SILOS = [
-  { name: "Pre-Starter", code: "pre_starter", capacityKg: 10000, currentStockKg: 1200, reorderLevelKg: 2000, category: "poultry" },
-  { name: "Starter", code: "starter", capacityKg: 10000, currentStockKg: 5600, reorderLevelKg: 2000, category: "poultry" },
-  { name: "Grower", code: "grower", capacityKg: 10000, currentStockKg: 6700, reorderLevelKg: 2000, category: "poultry" },
-  { name: "Finisher", code: "finisher", capacityKg: 10000, currentStockKg: 3200, reorderLevelKg: 2000, category: "poultry" },
-  { name: "Own Feed", code: "own_feed", capacityKg: 10000, currentStockKg: 4200, reorderLevelKg: 1500, category: "general" },
-  { name: "Cattle Feed", code: "cattle_feed", capacityKg: 10000, currentStockKg: 4500, reorderLevelKg: 2000, category: "cattle" },
-  { name: "Goat Feed", code: "goat_feed", capacityKg: 5000, currentStockKg: 2800, reorderLevelKg: 1000, category: "goat" },
+  // Poultry Feeds
+  { name: "Pre-Starter", code: "pre_starter", capacityKg: 10000, currentStockKg: 1200, reorderLevelKg: 2000, category: "poultry", categoryLabel: "Poultry Feed" },
+  { name: "Starter", code: "starter", capacityKg: 10000, currentStockKg: 5600, reorderLevelKg: 2000, category: "poultry", categoryLabel: "Poultry Feed" },
+  { name: "Grower", code: "grower", capacityKg: 10000, currentStockKg: 6700, reorderLevelKg: 2000, category: "poultry", categoryLabel: "Poultry Feed" },
+  { name: "Finisher", code: "finisher", capacityKg: 10000, currentStockKg: 3200, reorderLevelKg: 2000, category: "poultry", categoryLabel: "Poultry Feed" },
+  // Cattle & Dairy Feeds
+  { name: "Cattle Feed (Pellets)", code: "cattle_feed", capacityKg: 10000, currentStockKg: 4500, reorderLevelKg: 2000, category: "cattle", categoryLabel: "Cattle Feed" },
+  { name: "Mustard Cake (Sarson Khal)", code: "sarson_khal", capacityKg: 5000, currentStockKg: 1800, reorderLevelKg: 1000, category: "cattle", categoryLabel: "Cattle Feed", isFillerOrRawMaterial: true },
+  // Goat & Sheep Feeds
+  { name: "Goat Feed (Pellets)", code: "goat_feed", capacityKg: 5000, currentStockKg: 2800, reorderLevelKg: 1000, category: "goat", categoryLabel: "Goat Feed" },
+  // Fodder & Roughage (Bhusa / Chari)
+  { name: "Wheat Straw (Gehu Bhusa)", code: "wheat_straw_bhusa", capacityKg: 15000, currentStockKg: 6500, reorderLevelKg: 3000, category: "fodder", categoryLabel: "Fodder & Roughage", isFillerOrRawMaterial: true },
+  { name: "Green Fodder (Chari/Berseem)", code: "green_fodder", capacityKg: 20000, currentStockKg: 8500, reorderLevelKg: 4000, category: "fodder", categoryLabel: "Fodder & Roughage" },
+  // Raw Materials & Grains
+  { name: "Yellow Maize (Makka)", code: "maize_makka", capacityKg: 15000, currentStockKg: 7200, reorderLevelKg: 3000, category: "raw_material", categoryLabel: "Raw Material", isFillerOrRawMaterial: true },
+  { name: "Soybean Meal (DOC)", code: "soya_doc", capacityKg: 10000, currentStockKg: 3500, reorderLevelKg: 2000, category: "raw_material", categoryLabel: "Raw Material", isFillerOrRawMaterial: true },
+  // Fillers & Supplements (Minerals, Salt, Calcite)
+  { name: "Mineral Mixture (Chelated)", code: "mineral_mixture", capacityKg: 2000, currentStockKg: 650, reorderLevelKg: 300, category: "fillers", categoryLabel: "Fillers & Supplements", isFillerOrRawMaterial: true },
+  { name: "Calcium / Calcite Powder", code: "calcite_powder", capacityKg: 3000, currentStockKg: 950, reorderLevelKg: 500, category: "fillers", categoryLabel: "Fillers & Supplements", isFillerOrRawMaterial: true },
+  { name: "Common Salt", code: "common_salt", capacityKg: 1000, currentStockKg: 300, reorderLevelKg: 150, category: "fillers", categoryLabel: "Fillers & Supplements", isFillerOrRawMaterial: true },
+  // Custom / Farm Made Mix
+  { name: "Own Feed", code: "own_feed", capacityKg: 10000, currentStockKg: 4200, reorderLevelKg: 1500, category: "general", categoryLabel: "Farm Mixed Feed" },
 ];
 
-// Helper to seed silos if none exist
+// Helper to seed silos if none exist or seed missing farmhouse silos
 const ensureDefaultSilos = async (userId) => {
-  const count = await FeedSilo.countDocuments();
-  if (count === 0) {
-    for (const item of DEFAULT_SILOS) {
+  for (const item of DEFAULT_SILOS) {
+    const exists = await FeedSilo.findOne({ code: item.code });
+    if (!exists) {
       await FeedSilo.create({ ...item, createdBy: userId || null });
     }
   }
@@ -78,7 +93,7 @@ exports.getFeedSilos = async (req, res) => {
     const totalCapacityKg = silos.reduce((sum, s) => sum + (s.capacityKg || 0), 0);
     const lowStockCount = silos.filter((s) => s.currentStockKg <= s.reorderLevelKg).length;
 
-    // Calculate Category Breakdown (Poultry, Cattle, Goat, General)
+    // Calculate Category Breakdown (Poultry, Cattle, Goat, Fodder, Raw Material, Fillers, General, and Custom)
     const categorySummary = {
       poultry: {
         label: "Poultry Feed",
@@ -90,7 +105,7 @@ exports.getFeedSilos = async (req, res) => {
       },
       cattle: {
         label: "Cattle Feed",
-        sublabel: "Cow & Buffalo Rations",
+        sublabel: "Cow & Buffalo Rations, Khal",
         icon: "🐄",
         stockKg: 0,
         capacityKg: 0,
@@ -104,10 +119,34 @@ exports.getFeedSilos = async (req, res) => {
         capacityKg: 0,
         silosCount: 0,
       },
-      general: {
-        label: "General / Own Mix",
-        sublabel: "Farm Mixed Rations",
+      fodder: {
+        label: "Fodder & Roughage",
+        sublabel: "Wheat Straw (Bhusa), Green Chari",
         icon: "🌾",
+        stockKg: 0,
+        capacityKg: 0,
+        silosCount: 0,
+      },
+      raw_material: {
+        label: "Raw Materials",
+        sublabel: "Yellow Maize, Soya DOC, Grains",
+        icon: "🌽",
+        stockKg: 0,
+        capacityKg: 0,
+        silosCount: 0,
+      },
+      fillers: {
+        label: "Fillers & Minerals",
+        sublabel: "Mineral Mix, Calcite, Salt",
+        icon: "🧪",
+        stockKg: 0,
+        capacityKg: 0,
+        silosCount: 0,
+      },
+      general: {
+        label: "General / Farm Mix",
+        sublabel: "Custom Farm-Mixed Rations",
+        icon: "⚙️",
         stockKg: 0,
         capacityKg: 0,
         silosCount: 0,
@@ -115,12 +154,20 @@ exports.getFeedSilos = async (req, res) => {
     };
 
     silos.forEach((s) => {
-      const cat = s.category || "general";
-      if (categorySummary[cat]) {
-        categorySummary[cat].stockKg += (s.currentStockKg || 0);
-        categorySummary[cat].capacityKg += (s.capacityKg || 0);
-        categorySummary[cat].silosCount += 1;
+      const cat = (s.category || "general").toLowerCase();
+      if (!categorySummary[cat]) {
+        categorySummary[cat] = {
+          label: s.categoryLabel || cat.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()),
+          sublabel: "Custom Category",
+          icon: "📦",
+          stockKg: 0,
+          capacityKg: 0,
+          silosCount: 0,
+        };
       }
+      categorySummary[cat].stockKg += (s.currentStockKg || 0);
+      categorySummary[cat].capacityKg += (s.capacityKg || 0);
+      categorySummary[cat].silosCount += 1;
     });
 
     res.status(200).json({
@@ -142,10 +189,10 @@ exports.getFeedSilos = async (req, res) => {
 // @access  Private (Admin / Manager)
 exports.createFeedSilo = async (req, res) => {
   try {
-    const { name, capacityKg, currentStockKg, reorderLevelKg, category, unit, costPerKg } = req.body;
-    if (!name) return res.status(400).json({ message: "Silo name is required" });
+    const { name, capacityKg, currentStockKg, reorderLevelKg, category, categoryLabel, unit, costPerKg, isFillerOrRawMaterial, description } = req.body;
+    if (!name) return res.status(400).json({ message: "Feed item / silo name is required" });
 
-    const code = name.toLowerCase().replace(/[^a-z0-9]/g, "_");
+    const code = name.toLowerCase().replace(/[^a-z0-9]/g, "_") + "_" + Date.now().toString().slice(-4);
 
     const silo = await FeedSilo.create({
       name: name.trim(),
@@ -153,7 +200,10 @@ exports.createFeedSilo = async (req, res) => {
       capacityKg: Number(capacityKg) || 10000,
       currentStockKg: Number(currentStockKg) || 0,
       reorderLevelKg: Number(reorderLevelKg) || 2000,
-      category: category || "poultry",
+      category: (category || "general").toLowerCase().trim(),
+      categoryLabel: categoryLabel ? categoryLabel.trim() : "",
+      isFillerOrRawMaterial: Boolean(isFillerOrRawMaterial),
+      description: description ? description.trim() : "",
       unit: unit || "kg",
       costPerKg: Number(costPerKg) || 0,
       createdBy: req.user?._id,
@@ -173,16 +223,19 @@ exports.updateFeedSilo = async (req, res) => {
     const silo = await FeedSilo.findById(req.params.id);
     if (!silo) return res.status(404).json({ message: "Feed silo not found" });
 
-    const { name, capacityKg, currentStockKg, reorderLevelKg, category, costPerKg } = req.body;
+    const { name, capacityKg, currentStockKg, reorderLevelKg, category, categoryLabel, unit, costPerKg, isFillerOrRawMaterial, description } = req.body;
     if (name !== undefined) {
       silo.name = name.trim();
-      silo.code = name.toLowerCase().replace(/[^a-z0-9]/g, "_");
     }
-    if (capacityKg !== undefined) silo.capacityKg = Math.max(100, Number(capacityKg));
+    if (capacityKg !== undefined) silo.capacityKg = Math.max(10, Number(capacityKg));
     if (currentStockKg !== undefined) silo.currentStockKg = Math.max(0, Number(currentStockKg));
     if (reorderLevelKg !== undefined) silo.reorderLevelKg = Math.max(0, Number(reorderLevelKg));
-    if (category !== undefined) silo.category = category;
+    if (category !== undefined) silo.category = category.toLowerCase().trim();
+    if (categoryLabel !== undefined) silo.categoryLabel = categoryLabel ? categoryLabel.trim() : "";
+    if (unit !== undefined) silo.unit = unit;
     if (costPerKg !== undefined) silo.costPerKg = Number(costPerKg);
+    if (isFillerOrRawMaterial !== undefined) silo.isFillerOrRawMaterial = Boolean(isFillerOrRawMaterial);
+    if (description !== undefined) silo.description = description;
 
     await silo.save();
     res.status(200).json({ success: true, message: "Feed silo updated", silo });
