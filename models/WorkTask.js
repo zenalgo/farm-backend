@@ -37,6 +37,8 @@ const workTaskSchema = new mongoose.Schema(
 
     sampleWeight: { type: String, default: "" },
     userRemark: { type: String, default: "" },
+    audioRemark: { type: Object, default: null },
+    managerAudioRemark: { type: Object, default: null },
 
     // Optional — set when completing a task that consumed stock (e.g. feed).
     // Filled in by completeTask/resubmitTask if stockItemId+quantityUsed are sent.
@@ -50,6 +52,7 @@ const workTaskSchema = new mongoose.Schema(
       reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
       reviewedAt: { type: Date },
       note: { type: String, default: "" },
+      audioRemark: { type: Object, default: null },
     },
   },
   { timestamps: true }

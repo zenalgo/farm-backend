@@ -118,7 +118,7 @@ const assignTask = async (req, res) => {
     const staffIds = req.body.assignedTo
       ? Array.isArray(req.body.assignedTo) ? req.body.assignedTo : [req.body.assignedTo]
       : [];
-    const { date, notes, session, timeLabel, track } = req.body;
+    const { date, notes, session, timeLabel, track, managerAudioRemark } = req.body;
 
     if (categories.length === 0 || staffIds.length === 0 || !date) {
       return res.status(400).json({ message: "At least one category, one staff member, and a date are required" });
@@ -147,6 +147,7 @@ const assignTask = async (req, res) => {
           source: timeLabel || session ? "schedule" : "manual",
           date: day,
           notes: notes || "",
+          managerAudioRemark: managerAudioRemark || null,
           session: session || "",
           timeLabel: timeLabel || "",
           track: track || "",
@@ -261,6 +262,9 @@ const completeTask = async (req, res) => {
     task.proof = { photoUrl, videoUrl };
     task.status = "submitted";
     task.completedAt = new Date();
+    if (req.body.audioRemark) {
+      try { task.audioRemark = typeof req.body.audioRemark === "string" ? JSON.parse(req.body.audioRemark) : req.body.audioRemark; } catch(e) { task.audioRemark = req.body.audioRemark; }
+    }
     task.review = { status: "pending", reviewedBy: undefined, reviewedAt: undefined, note: "" };
     if (req.body.sampleWeight) {
       task.sampleWeight = req.body.sampleWeight;
@@ -318,6 +322,9 @@ const resubmitTask = async (req, res) => {
     task.proof = { photoUrl, videoUrl };
     task.status = "submitted";
     task.completedAt = new Date();
+    if (req.body.audioRemark) {
+      try { task.audioRemark = typeof req.body.audioRemark === "string" ? JSON.parse(req.body.audioRemark) : req.body.audioRemark; } catch(e) { task.audioRemark = req.body.audioRemark; }
+    }
     task.review = { status: "pending", reviewedBy: undefined, reviewedAt: undefined, note: "" };
     if (req.body.sampleWeight) {
       task.sampleWeight = req.body.sampleWeight;
@@ -381,7 +388,7 @@ const reviewTask = async (req, res) => {
     if (task.status !== "submitted") {
       return res.status(400).json({ message: "Only submitted tasks can be reviewed" });
     }
-    if (action === "decline" && !note) {
+    if (action === "decline" && !note && !req.body.audioRemark) {
       return res.status(400).json({ message: "A note is required when declining a task" });
     }
 
@@ -391,6 +398,7 @@ const reviewTask = async (req, res) => {
       reviewedBy: req.user._id,
       reviewedAt: new Date(),
       note: note || "",
+      audioRemark: req.body.audioRemark || null,
     };
     await task.save();
 
