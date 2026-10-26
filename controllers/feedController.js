@@ -607,7 +607,7 @@ exports.executeMixingStation = async (req, res) => {
   }
 };
 
-// Internal exported helper to deduct feed stock from Poultry & Animal modules
+// Internal exported helper to deduct feed stock from Poultry, Animal & Work Management modules
 exports.deductFeedStock = async ({
   siloId,
   feedType,
@@ -616,6 +616,7 @@ exports.deductFeedStock = async ({
   relatedPoultryBatch,
   relatedPoultryBrooder,
   relatedAnimal,
+  relatedWorkTask,
   description,
   userId,
 }) => {
@@ -633,6 +634,7 @@ exports.deductFeedStock = async ({
       if (source === "brooder") silo = await FeedSilo.findOne({ code: "pre_starter" }) || await FeedSilo.findOne({ code: "starter" });
       else if (source === "poultry") silo = await FeedSilo.findOne({ code: "grower" }) || await FeedSilo.findOne({ code: "starter" });
       else if (source === "animal") silo = await FeedSilo.findOne({ code: "cattle_feed" }) || await FeedSilo.findOne({ code: "own_feed" });
+      else if (source === "task") silo = await FeedSilo.findOne({ code: "grower" }) || await FeedSilo.findOne({ code: "cattle_feed" }) || await FeedSilo.findOne({ code: "own_feed" });
     }
 
     if (!silo) silo = await FeedSilo.findOne();
@@ -653,6 +655,7 @@ exports.deductFeedStock = async ({
       relatedPoultryBatch: relatedPoultryBatch || null,
       relatedPoultryBrooder: relatedPoultryBrooder || null,
       relatedAnimal: relatedAnimal || null,
+      relatedWorkTask: relatedWorkTask || null,
       description: description || `Consumed ${qty} kg ${silo.name} for ${source}`,
       recordedBy: userId || null,
     });
@@ -660,6 +663,31 @@ exports.deductFeedStock = async ({
     return { silo, transaction: tx };
   } catch (err) {
     console.error("deductFeedStock error:", err.message);
+    return null;
+  }
+};
+
+// Internal exported helper to revert feed stock deduction (e.g. when a task is declined or deleted)
+exports.revertFeedStockDeduction = async ({ transactionId, taskId }) => {
+  try {
+    let tx = null;
+    if (transactionId) {
+      tx = await FeedTransaction.findById(transactionId);
+    } else if (taskId) {
+      tx = await FeedTransaction.findOne({ relatedWorkTask: taskId, type: "DEBIT" });
+    }
+    if (!tx) return null;
+
+    const silo = await FeedSilo.findById(tx.silo);
+    if (silo) {
+      silo.currentStockKg = (silo.currentStockKg || 0) + (tx.quantity || 0);
+      await silo.save();
+    }
+
+    await FeedTransaction.findByIdAndDelete(tx._id);
+    return { refundedKg: tx.quantity, silo };
+  } catch (err) {
+    console.error("revertFeedStockDeduction error:", err.message);
     return null;
   }
 };

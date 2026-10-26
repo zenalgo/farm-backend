@@ -3,7 +3,8 @@ const WorkRecurring = require("../models/WorkRecurring");
 const WorkTask = require("../models/WorkTask");
 const uploadBufferToCloudinary = require("../utils/uploadToCloudinary");
 const { generateScheduleTasksForUserToday } = require("./scheduleController");
-const { deductStockForTask } = require("./inventoryController");
+const FeedSilo = require("../models/FeedSilo");
+const { deductFeedStock, revertFeedStockDeduction } = require("./feedController");
 const { generateAssetInspections } = require("./assetController");
 const { generatePoultryTasksForUserToday } = require("./poultryController");
 const { generateFieldPatchTasksForUserToday } = require("./fieldPatchController");
@@ -118,10 +119,18 @@ const assignTask = async (req, res) => {
     const staffIds = req.body.assignedTo
       ? Array.isArray(req.body.assignedTo) ? req.body.assignedTo : [req.body.assignedTo]
       : [];
-    const { date, notes, session, timeLabel, track, managerAudioRemark } = req.body;
+    const { date, notes, session, timeLabel, track, managerAudioRemark, feedSiloId, feedQuantityKg, feedType } = req.body;
 
     if (categories.length === 0 || staffIds.length === 0 || !date) {
       return res.status(400).json({ message: "At least one category, one staff member, and a date are required" });
+    }
+
+    let resolvedFeedType = feedType || "";
+    if (feedSiloId && !resolvedFeedType) {
+      try {
+        const siloDoc = await FeedSilo.findById(feedSiloId);
+        if (siloDoc) resolvedFeedType = siloDoc.name;
+      } catch (e) {}
     }
 
     const day = startOfDay(new Date(date));
@@ -151,6 +160,9 @@ const assignTask = async (req, res) => {
           session: session || "",
           timeLabel: timeLabel || "",
           track: track || "",
+          feedSilo: feedSiloId || null,
+          feedType: resolvedFeedType,
+          feedQuantityKg: Number(feedQuantityKg) || 0,
         });
         created.push(task);
       }
@@ -209,7 +221,10 @@ const getMyTasks = async (req, res) => {
       try { await generateFieldPatchTasksForUserToday(req.user._id, day); } catch (e) {}
     }
 
-    const tasks = await WorkTask.find({ assignedTo: req.user._id, date: day }).sort({ createdAt: 1 });
+    const tasks = await WorkTask.find({ assignedTo: req.user._id, date: day })
+      .populate("feedSilo", "name code category currentStockKg unit")
+      .populate("feedTransaction", "type quantity date source")
+      .sort({ createdAt: 1 });
     res.status(200).json({ count: tasks.length, tasks });
   } catch (error) {
     res.status(500).json({ message: "Failed to fetch tasks", error: error.message });
@@ -273,14 +288,38 @@ const completeTask = async (req, res) => {
       task.userRemark = req.body.userRemark || req.body.remarks;
     }
 
-    // Optional — if this task consumed feed/medicine, deduct it from stock now
-    const { stockItemId, quantityUsed } = req.body;
-    if (stockItemId && quantityUsed) {
+    // Feed stock deduction flow for Feeding tasks
+    const targetSiloId = req.body.feedSiloId || req.body.siloId || req.body.stockItemId || task.feedSilo;
+    const targetFeedQty = Number(
+      req.body.feedQuantityKg !== undefined
+        ? req.body.feedQuantityKg
+        : req.body.quantityUsed !== undefined
+        ? req.body.quantityUsed
+        : 0
+    );
+
+    if (targetFeedQty > 0) {
       try {
-        await deductStockForTask(stockItemId, quantityUsed, task._id, req.user._id);
-        task.stockUsage = { item: stockItemId, quantity: Number(quantityUsed) };
-      } catch (stockError) {
-        console.error("Stock deduction failed:", stockError.message);
+        const feedResult = await deductFeedStock({
+          siloId: targetSiloId,
+          feedType: req.body.feedType || task.feedType,
+          quantityKg: targetFeedQty,
+          source: "task",
+          relatedWorkTask: task._id,
+          description: `Work Task Feeding (${task.category}): ${targetFeedQty} kg`,
+          userId: req.user._id,
+        });
+
+        if (feedResult) {
+          task.feedSilo = feedResult.silo._id;
+          task.feedType = feedResult.silo.name;
+          task.feedQuantityKg = targetFeedQty;
+          task.feedTransaction = feedResult.transaction._id;
+          task.isFeedDeducted = true;
+          task.stockUsage = { item: feedResult.silo._id, quantity: targetFeedQty };
+        }
+      } catch (feedError) {
+        console.error("Feed deduction failed in completeTask:", feedError.message);
       }
     }
 
@@ -333,13 +372,44 @@ const resubmitTask = async (req, res) => {
       task.userRemark = req.body.userRemark || req.body.remarks;
     }
 
-    const { stockItemId, quantityUsed } = req.body;
-    if (stockItemId && quantityUsed) {
+    // Feed stock deduction flow for Resubmitted Feeding tasks
+    const targetSiloId = req.body.feedSiloId || req.body.siloId || req.body.stockItemId || task.feedSilo;
+    const targetFeedQty = Number(
+      req.body.feedQuantityKg !== undefined
+        ? req.body.feedQuantityKg
+        : req.body.quantityUsed !== undefined
+        ? req.body.quantityUsed
+        : 0
+    );
+
+    if (targetFeedQty > 0) {
       try {
-        await deductStockForTask(stockItemId, quantityUsed, task._id, req.user._id);
-        task.stockUsage = { item: stockItemId, quantity: Number(quantityUsed) };
-      } catch (stockError) {
-        console.error("Stock deduction failed:", stockError.message);
+        // If feed was already deducted previously, revert old deduction first
+        if (task.isFeedDeducted && task.feedTransaction) {
+          await revertFeedStockDeduction({ transactionId: task.feedTransaction, taskId: task._id });
+          task.isFeedDeducted = false;
+        }
+
+        const feedResult = await deductFeedStock({
+          siloId: targetSiloId,
+          feedType: req.body.feedType || task.feedType,
+          quantityKg: targetFeedQty,
+          source: "task",
+          relatedWorkTask: task._id,
+          description: `Work Task Feeding Resubmit (${task.category}): ${targetFeedQty} kg`,
+          userId: req.user._id,
+        });
+
+        if (feedResult) {
+          task.feedSilo = feedResult.silo._id;
+          task.feedType = feedResult.silo.name;
+          task.feedQuantityKg = targetFeedQty;
+          task.feedTransaction = feedResult.transaction._id;
+          task.isFeedDeducted = true;
+          task.stockUsage = { item: feedResult.silo._id, quantity: targetFeedQty };
+        }
+      } catch (feedError) {
+        console.error("Feed deduction failed in resubmitTask:", feedError.message);
       }
     }
 
@@ -368,6 +438,8 @@ const getAllTasks = async (req, res) => {
     const tasks = await WorkTask.find(filter)
       .populate("assignedTo", "name role")
       .populate("assignedBy", "name role")
+      .populate("feedSilo", "name code category currentStockKg unit")
+      .populate("feedTransaction", "type quantity date source")
       .sort({ date: -1, createdAt: -1 });
 
     res.status(200).json({ count: tasks.length, tasks });
@@ -400,6 +472,18 @@ const reviewTask = async (req, res) => {
       note: note || "",
       audioRemark: req.body.audioRemark || null,
     };
+
+    if (action === "decline") {
+      if (task.isFeedDeducted && task.feedTransaction) {
+        try {
+          await revertFeedStockDeduction({ transactionId: task.feedTransaction, taskId: task._id });
+          task.isFeedDeducted = false;
+        } catch (revErr) {
+          console.error("Failed to revert feed deduction on decline:", revErr.message);
+        }
+      }
+    }
+
     await task.save();
 
     res.status(200).json({ message: `Task ${action}d`, task });
@@ -410,8 +494,18 @@ const reviewTask = async (req, res) => {
 
 const deleteTask = async (req, res) => {
   try {
-    const task = await WorkTask.findByIdAndDelete(req.params.id);
+    const task = await WorkTask.findById(req.params.id);
     if (!task) return res.status(404).json({ message: "Task not found" });
+
+    if (task.isFeedDeducted && task.feedTransaction) {
+      try {
+        await revertFeedStockDeduction({ transactionId: task.feedTransaction, taskId: task._id });
+      } catch (revErr) {
+        console.error("Failed to revert feed deduction on deleteTask:", revErr.message);
+      }
+    }
+
+    await WorkTask.findByIdAndDelete(req.params.id);
     res.status(200).json({ message: "Task removed successfully", task });
   } catch (error) {
     res.status(500).json({ message: "Failed to delete task", error: error.message });

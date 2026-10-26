@@ -40,10 +40,16 @@ const workTaskSchema = new mongoose.Schema(
     audioRemark: { type: Object, default: null },
     managerAudioRemark: { type: Object, default: null },
 
-    // Optional — set when completing a task that consumed stock (e.g. feed).
-    // Filled in by completeTask/resubmitTask if stockItemId+quantityUsed are sent.
+    // Feed / Silo Stock integration — ensures all feeding tasks deduct properly from Feed Stock
+    feedSilo: { type: mongoose.Schema.Types.ObjectId, ref: "FeedSilo", default: null },
+    feedType: { type: String, default: "" },
+    feedQuantityKg: { type: Number, default: 0 },
+    feedTransaction: { type: mongoose.Schema.Types.ObjectId, ref: "FeedTransaction", default: null },
+    isFeedDeducted: { type: Boolean, default: false },
+
+    // Optional legacy field maintained for backwards compatibility
     stockUsage: {
-      item: { type: mongoose.Schema.Types.ObjectId, ref: "InventoryItem" },
+      item: { type: mongoose.Schema.Types.ObjectId, ref: "FeedSilo" },
       quantity: { type: Number },
     },
 

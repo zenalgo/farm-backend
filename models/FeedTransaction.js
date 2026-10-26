@@ -19,6 +19,7 @@ const feedTransactionSchema = new mongoose.Schema(
     relatedPoultryBatch: { type: mongoose.Schema.Types.ObjectId, ref: "PoultryBatch", default: null },
     relatedPoultryBrooder: { type: mongoose.Schema.Types.ObjectId, ref: "PoultryBrooder", default: null },
     relatedAnimal: { type: mongoose.Schema.Types.ObjectId, ref: "Animal", default: null },
+    relatedWorkTask: { type: mongoose.Schema.Types.ObjectId, ref: "WorkTask", default: null },
     mixingBatchId: { type: String, default: null }, // groups transactions from the same mixing operation
     vendor: { type: String, default: "" },
     description: { type: String, default: "" },
